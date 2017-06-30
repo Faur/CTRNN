@@ -64,38 +64,39 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
 
 class CTRNNModel(object):
-    def __init__(self, x, y, init_tuple, input_dim, num_units, output_dim, learning_rate=1e-4):
+    def __init__(self, num_steps, input_dim, num_units, output_dim, tau=1, learning_rate=1e-4):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
 
         """
-
-        # TODO: CHECK if these are duplicated in the graph
-        self.x = x
-        self.y = y
-        self.init_tuple = init_tuple
-        x = tf.one_hot(x, input_dim) # TODO: This should probably not be hard coded
-
+        self.tau = tau
         self.num_units = num_units 
         self.output_dim = output_dim 
-        x_shape = tf.shape(x)
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
 
-        self.cell = CTRNNCell(num_units, tau=5, activation=self.activation)
+        self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
+        self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
+        self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
+        init_c1 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC1')
+        init_c2 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC2')
+        init_u = tf.placeholder(tf.float32, shape=[None, num_units], name='initU')
+        self.init_tuple = (init_c1, (init_c2, init_u))
+        # x = tf.one_hot(x, input_dim) # TODO: This should probably not be hard coded
 
-        print('x', x.get_shape())
-        print('init_tuple', type(init_tuple))
-        print('init_tuple[0]', init_tuple[0].get_shape())
-        print('init_tuple[1][0]', init_tuple[1][0].get_shape())
-        print('init_tuple[1][1]', init_tuple[1][1].get_shape())
+        self.cell = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
+
+        # print('x', self.x.get_shape())
+        # print('init_tuple', type(self.init_tuple))
+        # print('init_tuple[0]', self.init_tuple[0].get_shape())
+        # print('init_tuple[1][0]', self.init_tuple[1][0].get_shape())
+        # print('init_tuple[1][1]', self.init_tuple[1][1].get_shape())
         
         self.rnn_outputs, self.final_states = tf.scan(
             lambda state, x: self.cell(x, state[1]),
-            tf.transpose(x, [1, 0, 2]),
+            tf.transpose(self.x, [1, 0, 2]),
             # tf.transpose(x, [1, 0] + [i+2 for i in range(x_shape.shape[0]-2)]),
                 # We need shape = [num_seq, batch_size, ...]
             initializer=self.init_tuple
-#             initializer=(self.init_x, self.init_state)
         )
 
 #         print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
@@ -106,7 +107,6 @@ class CTRNNModel(object):
                            (self.final_states[0][-1], self.final_states[1][-1]))
 
         rnn_outputs = tf.reshape(self.rnn_outputs, [-1, num_units])
-        self.y_reshaped = tf.reshape(tf.transpose(y, [1,0]), [-1])
 
         with tf.variable_scope('softmax'):
             W = tf.get_variable('W', [num_units, output_dim])
@@ -119,12 +119,6 @@ class CTRNNModel(object):
 
         self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
 
-#     def zero_state_tuple(self, batch_size):
-#         """ Returns a tuple og zeros with shapes:
-#                 [rnn_output.shape, final_state.output]
-#         """
-#         state = self.cell.zero_state(batch_size)
-#         return state[0], state
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros with shapes:
                 [rnn_output.shape, final_state.output]
