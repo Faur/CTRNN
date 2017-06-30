@@ -7,16 +7,11 @@ from tensorflow.python.ops.rnn_cell_impl import _linear
     # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell_impl.py
 
 class CTRNNCell(tf.nn.rnn_cell.RNNCell):
-    """ API Conventions: https://giathub.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
+    """ API Conventions: https://github.com/tensorflow/tensorflow/blob/r1.2/tensorflow/python/ops/rnn_cell_impl.py
     """
-    # TODO: Make a method that creates a zero state_tuple for initialization
     def __init__(self, num_units, tau, activation=None):
         self._num_units = num_units
         self.tau = tau
-#         TODO: Implement: Possible values of tau:
-#             * constant scalar
-#             * variable scalar (learnable, shared for entire layer)
-#             * variable vector (learnable, individually)
         if activation is None:
             self.activation = lambda x: 1.7159 * tf.tanh(2/3*x)
             # from: LeCun et al. 2012: Efficient backprop
@@ -43,15 +38,6 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
             old_c = state[0]
             old_u = state[1]
-#             inputs = tf.expand_dims(inputs, axis=1)
-#             concat_vector = tf.concat([inputs, old_c], axis=1)
-#             print('concat_vector', concat_vector.get_shape())
-#             print('inputs', inputs.get_shape())
-#             print('old_c', old_c.get_shape())
-#             with tf.variable_scope('linear'):
-#                 W = tf.get_variable('W', [num_units, output_dim])
-#                 b = tf.get_variable('b', [output_dim], initializer=tf.constant_initializer(0.0))
-#                 logits = tf.matmul(concat_vector, W) + b
             with tf.variable_scope('linear'):
                 logits = _linear([inputs, old_c], output_size=self.output_size, bias=True)
 
@@ -63,14 +49,51 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
         return new_c, (new_c, new_u)
 
 
+class MultiLayerHandler():
+    def __init__(self, layers):
+        self.layers = layers
+
+    @property # Function is callable without (), as if it was a property...
+    def state_size(self):
+        num_units = []
+        for l in self.layers:
+            num_units += l.state_size
+        return num_units
+
+    @property
+    def output_size(self):
+        return self.layers[0]._num_units
+
+    def zero_state(self, batch_size, dtype=tf.float32):
+        """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
+        zero_states = []
+        for l in self.layers:
+            zero_states += l.zero_state(batch_size)
+        return zero_states
+
+    def __call__(self, inputs, state, scope=None):
+
+        with tf.variable_scope(scope or type(self).__name__):
+            for i, l in enumerate(self.layers):
+                with tf.variable_scope('layer' + str(i)):
+                    inputs, state = l(inputs, state)
+
+        return inputs, state
+
+
+
 class CTRNNModel(object):
-    def __init__(self, num_steps, input_dim, num_units, output_dim, tau=1, learning_rate=1e-4):
+    def __init__(self, num_units, tau, num_steps, input_dim, output_dim, learning_rate=1e-4):
         """ Assumptions
             * x is 3 dimensional: [batch_size, num_steps] 
 
+            Args:
+            * num_units: list with num_units
+            * taus: list with tau values (also if it is only one element!)
         """
+        self.num_units = num_units
         self.tau = tau
-        self.num_units = num_units 
+
         self.output_dim = output_dim 
         self.activation = lambda x: 1.7159 * tf.tanh(2/3 * x)
 
@@ -80,10 +103,29 @@ class CTRNNModel(object):
         init_c1 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC1')
         init_c2 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC2')
         init_u = tf.placeholder(tf.float32, shape=[None, num_units], name='initU')
+        # init_c1 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC1')
+        # init_c2 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC2')
+        # init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU')
         self.init_tuple = (init_c1, (init_c2, init_u))
         # x = tf.one_hot(x, input_dim) # TODO: This should probably not be hard coded
 
-        self.cell = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
+        # cells = []
+        # for i in range(3):
+        #     cells += [CTRNNCell(num_units, tau=self.tau, activation=self.activation)]
+        # self.cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
+
+        # cells = []
+        # for i in range(len(self.num_units)):
+        #     if len(self.taus) == 1:
+        #         tau_ = self.taus[0]
+        #     else:
+        #         tau_ = self.taus[i]
+        #     cells += [CTRNNCell(self.num_units[i], tau=tau_, activation=self.activation)]
+        # self.cell = MultiLayerHandler(cells)
+
+        cell1 = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
+        cell2 = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
+        self.cell = MultiLayerHandler([cell1, cell2])
 
         # print('x', self.x.get_shape())
         # print('init_tuple', type(self.init_tuple))
