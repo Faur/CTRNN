@@ -81,7 +81,6 @@ class MultiLayerHandler():
         return inputs, state
 
 
-
 class CTRNNModel(object):
     def __init__(self, num_units, tau, num_steps, input_dim, output_dim, learning_rate=1e-4):
         """ Assumptions
@@ -100,32 +99,17 @@ class CTRNNModel(object):
         self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
         self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
-        init_c1 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC1')
-        init_c2 = tf.placeholder(tf.float32, shape=[None, num_units], name='initC2')
-        init_u = tf.placeholder(tf.float32, shape=[None, num_units], name='initU')
-        # init_c1 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC1')
-        # init_c2 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC2')
-        # init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU')
+        init_c1 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC1')
+        init_c2 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC2')
+        init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU')
         self.init_tuple = (init_c1, (init_c2, init_u))
-        # x = tf.one_hot(x, input_dim) # TODO: This should probably not be hard coded
 
-        # cells = []
-        # for i in range(3):
-        #     cells += [CTRNNCell(num_units, tau=self.tau, activation=self.activation)]
-        # self.cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
-
-        # cells = []
-        # for i in range(len(self.num_units)):
-        #     if len(self.taus) == 1:
-        #         tau_ = self.taus[0]
-        #     else:
-        #         tau_ = self.taus[i]
-        #     cells += [CTRNNCell(self.num_units[i], tau=tau_, activation=self.activation)]
-        # self.cell = MultiLayerHandler(cells)
-
-        cell1 = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
-        cell2 = CTRNNCell(num_units, tau=self.tau, activation=self.activation)
-        self.cell = MultiLayerHandler([cell1, cell2])
+        cells = []
+        for i in range(2):
+            num_unit = num_units[i]
+            tau = self.tau[i]
+            cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
+        self.cell = MultiLayerHandler(cells)
 
         # print('x', self.x.get_shape())
         # print('init_tuple', type(self.init_tuple))
@@ -148,10 +132,10 @@ class CTRNNModel(object):
         self.state_tuple = (self.rnn_outputs[-1], 
                            (self.final_states[0][-1], self.final_states[1][-1]))
 
-        rnn_outputs = tf.reshape(self.rnn_outputs, [-1, num_units])
+        rnn_outputs = tf.reshape(self.rnn_outputs, [-1, num_units[0]])
 
         with tf.variable_scope('softmax'):
-            W = tf.get_variable('W', [num_units, output_dim])
+            W = tf.get_variable('W', [num_units[0], output_dim])
             b = tf.get_variable('b', [output_dim], initializer=tf.constant_initializer(0.0))
             self.logits = tf.matmul(rnn_outputs, W) + b
             self.softmax = tf.nn.softmax(self.logits, dim=-1)
@@ -165,8 +149,8 @@ class CTRNNModel(object):
         """ Returns a tuple og zeros with shapes:
                 [rnn_output.shape, final_state.output]
         """
-        output = np.zeros([batch_size, self.num_units])
-        state = np.zeros([batch_size, self.num_units])
+        output = np.zeros([batch_size, self.num_units[0]])
+        state = np.zeros([batch_size, self.num_units[0]])
         return (output, (output, state))
 
 
