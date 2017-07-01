@@ -142,8 +142,10 @@ class CTRNNModel(object):
 
         self.total_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=self.logits, labels=self.y_reshaped))
+        tf.summary.scalar('training/total_loss', self.total_loss)
 
         self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.total_loss)
+        self.TBsummaries = tf.summary.merge_all()
 
     def zero_state_tuple(self, batch_size):
         """ Returns a tuple og zeros with shapes:
