@@ -27,11 +27,40 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
     def output_size(self):
         return self._num_units
 
-    def zero_state(self, batch_size, dtype=tf.float32):
-        """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
-        zero_c = tf.zeros([batch_size, self.state_size], dtype=dtype)
-        zero_u = tf.zeros([batch_size, self.state_size], dtype=dtype)
-        return (zero_c, zero_u)
+    def zero_state(self, batch_size, dtype):
+        """Return zero-filled state tensor(s).
+
+        Args:
+          batch_size: int, float, or unit Tensor representing the batch size.
+          dtype: the data type to use for the state.
+
+        Returns:
+          If `state_size` is an int or TensorShape, then the return value is a
+          `N-D` tensor of shape `[batch_size x state_size]` filled with zeros.
+
+          If `state_size` is a nested list or tuple, then the return value is
+          a nested list or tuple (of the same structure) of `2-D` tensors with
+        the shapes `[batch_size x s]` for each s in `state_size`.
+        """
+        state_size = self.state_size
+        if nest.is_sequence(state_size):
+            state_size_flat = nest.flatten(state_size)
+            zeros_flat = [
+                array_ops.zeros(
+                    array_ops.stack(_state_size_with_prefix(s, prefix=[batch_size])),
+                    dtype=dtype)
+                for s in state_size_flat]
+            for s, z in zip(state_size_flat, zeros_flat):
+                z.set_shape(_state_size_with_prefix(s, prefix=[None]))
+            zeros = nest.pack_sequence_as(structure=state_size,
+                                        flat_sequence=zeros_flat)
+        else:
+            zeros_size = _state_size_with_prefix(state_size, prefix=[batch_size])
+            zeros = array_ops.zeros(array_ops.stack(zeros_size), dtype=dtype)
+            zeros.set_shape(_state_size_with_prefix(state_size, prefix=[None]))
+
+        return zeros
+
 
     def __call__(self, inputs, state, scope=None):
         with tf.variable_scope(scope or type(self).__name__):
@@ -55,21 +84,39 @@ class MultiLayerHandler():
 
     @property # Function is callable without (), as if it was a property...
     def state_size(self):
-        num_units = []
-        for l in self.layers:
-            num_units += l.state_size
-        return num_units
+        raise NotImplementedError
+        # num_units = []
+        # for l in self.layers:
+        #     num_units += l.state_size
+        # return num_units
 
     @property
     def output_size(self):
-        return self.layers[0]._num_units
+        raise NotImplementedError
+        # return self.layers[0]._num_units
 
-    def zero_state(self, batch_size, dtype=tf.float32):
-        """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
-        zero_states = []
-        for l in self.layers:
-            zero_states += l.zero_state(batch_size)
-        return zero_states
+    def zero_state(self, batch_size, dtype):
+        """Return zero-filled state tensor(s).
+
+        Args:
+          batch_size: int, float, or unit Tensor representing the batch size.
+          dtype: the data type to use for the state.
+
+        Returns:
+          If `state_size` is an int or TensorShape, then the return value is a
+          `N-D` tensor of shape `[batch_size x state_size]` filled with zeros.
+
+          If `state_size` is a nested list or tuple, then the return value is
+          a nested list or tuple (of the same structure) of `2-D` tensors with
+        the shapes `[batch_size x s]` for each s in `state_size`.
+        """
+        raise NotImplementedError
+    #     """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
+    #     zero_states = []
+    #     for l in self.layers:
+    #         zero_states += l.zero_state(batch_size)
+    #     return zero_states
+
 
     def __call__(self, inputs, state, scope=None):
 
