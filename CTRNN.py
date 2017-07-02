@@ -143,10 +143,10 @@ class MultiLayerHandler():
 
                 cur_state = state[i]
                 if i == 0: # IO level, last executed
-                    # print('IO level')
+                    print('IO level')
                     cur_input = [inputs] + [state[i+1][0]]
                 elif i == self.num_layers - 1: # Highest level
-                    # print('Highest level')
+                    print('Highest level')
                     cur_input = [state[i-1][0]]
                     # print(cur_input)
                 else: # Inbetween layers
@@ -213,11 +213,11 @@ class CTRNNModel(object):
         # print((init_c, init_u))
 
         cells = []
-        for i in range(self.num_layers):
+        for i in range(self.num_layers): 
             num_unit = num_units[i]
             tau = self.tau[i]
             cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
-        self.cell = MultiLayerHandler(cells)
+        self.cell = MultiLayerHandler(cells) # First cell (index 0) is IO layer
 
         # print('x', self.x.get_shape())
         # print('init_tuple', type(self.init_tuple))
