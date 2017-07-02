@@ -64,11 +64,17 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
     def __call__(self, inputs, state, scope=None):
         with tf.variable_scope(scope or type(self).__name__):
-
             old_c = state[0]
             old_u = state[1]
+            # print(scope)
+            # print('inputs', len(inputs), inputs[0].get_shape())
+            # print('state', type(state))
+            # print('state[0]', state[0].get_shape())
+            # print('state[1]', state[1].get_shape())
+            # print()
+
             with tf.variable_scope('linear'):
-                logits = _linear([inputs, old_c], output_size=self.output_size, bias=True)
+                logits = _linear(inputs + [old_c], output_size=self.output_size, bias=True)
 
             with tf.variable_scope('applyTau'):
                 new_u = (1-1/self.tau)*old_u + 1/self.tau*logits
@@ -77,10 +83,20 @@ class CTRNNCell(tf.nn.rnn_cell.RNNCell):
 
         return new_c, (new_c, new_u)
 
+def shape_printer(obj, prefix):
+    try:
+        print(prefix, obj.shape)
+    except AttributeError:
+        print(prefix, type(obj))
+        for o in obj:
+            shape_printer(o, prefix + '\t')
+
 
 class MultiLayerHandler():
     def __init__(self, layers):
+        """ layers: A list of layers """
         self.layers = layers
+        self.num_layers = len(layers)
 
     @property # Function is callable without (), as if it was a property...
     def state_size(self):
@@ -111,21 +127,49 @@ class MultiLayerHandler():
         the shapes `[batch_size x s]` for each s in `state_size`.
         """
         raise NotImplementedError
-    #     """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
-    #     zero_states = []
-    #     for l in self.layers:
-    #         zero_states += l.zero_state(batch_size)
-    #     return zero_states
-
+        # """ Returns a zero filled tuple with shapes equivalent to (new_c, new_u)"""
+        # zero_states = []
+        # for l in self.layers:
+        #     zero_states += l.zero_state(batch_size)
+        # return zero_states
 
     def __call__(self, inputs, state, scope=None):
 
         with tf.variable_scope(scope or type(self).__name__):
-            for i, l in enumerate(self.layers):
-                with tf.variable_scope('layer' + str(i)):
-                    inputs, state = l(inputs, state)
+            out_state = []
+            for i_, l in enumerate(reversed(self.layers)): # Start with the top level
+                i = self.num_layers - i_ - 1
+                scope = 'CTRNNCell_' + str(i)
 
-        return inputs, state
+                cur_state = state[i]
+                if i == 0: # IO level, last executed
+                    # print('IO level')
+                    cur_input = [inputs] + [state[i+1][0]]
+                elif i == self.num_layers - 1: # Highest level
+                    # print('Highest level')
+                    cur_input = [state[i-1][0]]
+                    # print(cur_input)
+                else: # Inbetween layers
+                    cur_input = [state[i-1][0]] + [state[i+1][0]]
+
+                outputs, state_ = l(cur_input, cur_state, scope=scope)
+                # print('state_', type(state_))
+                # print('state_[0]', state_[0].get_shape())
+                out_state += [state_]
+
+            out_state = tuple(out_state)
+
+            # shape_printer(out_state, 'MLH')
+
+            # print('outputs', outputs.get_shape())
+            # print('out_state[0][0]', out_state[0][0].get_shape())
+            return outputs, out_state
+
+        # with tf.variable_scope(scope or type(self).__name__):
+        #     for i, l in enumerate(self.layers):
+        #         scope = 'CTRNNCell_' + str(i)
+        #         inputs, state = l([inputs], state, scope=scope)
+        # return inputs, state
 
 
 class CTRNNModel(object):
@@ -134,10 +178,11 @@ class CTRNNModel(object):
             * x is 3 dimensional: [batch_size, num_steps] 
 
             Args:
-            * num_units: list with num_units
+            * num_units: list with num_units, with num_units[0] being the IO layer
             * taus: list with tau values (also if it is only one element!)
         """
         self.num_units = num_units
+        self.num_layers = len(self.num_units)
         self.tau = tau
 
         self.output_dim = output_dim 
@@ -146,13 +191,29 @@ class CTRNNModel(object):
         self.x = tf.placeholder(tf.float32, shape=[None, num_steps, input_dim], name='inputPlaceholder')
         self.y = tf.placeholder(tf.int32, shape=[None, num_steps], name='outputPlaceholder')
         self.y_reshaped = tf.reshape(tf.transpose(self.y, [1,0]), [-1])
-        init_c1 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC1')
-        init_c2 = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC2')
-        init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU')
-        self.init_tuple = (init_c1, (init_c2, init_u))
+
+
+        init_input = tf.placeholder(tf.float32, shape=[None, self.num_units[0]], name='initInput')
+        init_state = []
+        for i, num_unit in enumerate(self.num_units):
+            init_c = tf.placeholder(tf.float32, shape=[None, num_unit], name='initC_' + str(i))
+            init_u = tf.placeholder(tf.float32, shape=[None, num_unit], name='initU_' + str(i))
+            init_state += [(init_c, init_u)]
+        init_state = tuple(init_state)
+        # print('init_input', init_input.get_shape())
+        # print('init_state[0][0]', init_state[0][0].get_shape())
+        # print()
+        self.init_tuple = (init_input, init_state)
+        # self.init_tuple = (init_input, init_state[0])
+
+        # init_c = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initC_')
+        # init_u = tf.placeholder(tf.float32, shape=[None, num_units[0]], name='initU_')
+        # self.init_tuple = (init_input, (init_c, init_u))
+        # print(init_state[0])
+        # print((init_c, init_u))
 
         cells = []
-        for i in range(2):
+        for i in range(self.num_layers):
             num_unit = num_units[i]
             tau = self.tau[i]
             cells += [CTRNNCell(num_unit, tau=tau, activation=self.activation)]
@@ -172,12 +233,26 @@ class CTRNNModel(object):
             initializer=self.init_tuple
         )
 
-#         print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
-#         print('self.final_states', type(self.final_states))
-#         print('self.final_states[0][-1]', self.final_states[0][-1].shape)
-#         print('self.final_states[1][-1]', self.final_states[1][-1].shape)
-        self.state_tuple = (self.rnn_outputs[-1], 
-                           (self.final_states[0][-1], self.final_states[1][-1]))
+        # print('self.rnn_outputs[-1]', self.rnn_outputs[-1].shape)
+        # print('self.final_states', type(self.final_states))
+        # print('self.final_states[0][-1]', self.final_states[0][-1].shape)
+        # print('self.final_states[1][-1]', self.final_states[1][-1].shape)
+
+        # print('shape_printer: self.final_states')
+        # shape_printer(self.final_states, 'fs')
+
+        # self.state_tuple = (self.rnn_outputs[-1], 
+        #                    (self.final_states[0][-1][-1], self.final_states[1][-1][-1]))
+
+        state_state = []
+        for i in range(self.num_layers):
+            state_state += [(self.final_states[i][0][-1], self.final_states[i][1][-1])]
+        state_state = tuple(state_state)
+        self.state_tuple = (self.rnn_outputs[-1], state_state)
+
+        # print('shape_printer: self.state_tuple')
+        # shape_printer(self.state_tuple, 'st')
+
 
         rnn_outputs = tf.reshape(self.rnn_outputs, [-1, num_units[0]])
 
@@ -195,12 +270,21 @@ class CTRNNModel(object):
         self.TBsummaries = tf.summary.merge_all()
 
     def zero_state_tuple(self, batch_size):
-        """ Returns a tuple og zeros with shapes:
-                [rnn_output.shape, final_state.output]
+        """ Returns a tuple og zeros
         """
-        output = np.zeros([batch_size, self.num_units[0]])
-        state = np.zeros([batch_size, self.num_units[0]])
-        return (output, (output, state))
+        zero_input = np.zeros([batch_size, self.num_units[0]])
+
+        zero_state = []
+        for i, num_unit in enumerate(self.num_units):
+            zero_c = np.zeros([batch_size, self.num_units[i]])
+            zero_u = np.zeros([batch_size, self.num_units[i]])
+            zero_state += [(zero_c, zero_u)]
+
+        zero_state = tuple(zero_state)
+        return (zero_input, zero_state)
+        # output = np.zeros([batch_size, self.num_units[0]])
+        # state = np.zeros([batch_size, self.num_units[0]])
+        # return (output, (output, state))
 
 
 
