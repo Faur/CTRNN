@@ -157,12 +157,11 @@ class MultiLayerHandler():
                 # print('state_[0]', state_[0].get_shape())
                 out_state += [state_]
 
-            out_state = tuple(out_state)
+            out_state = tuple(reversed(out_state))
 
-            # shape_printer(out_state, 'MLH')
-
-            # print('outputs', outputs.get_shape())
-            # print('out_state[0][0]', out_state[0][0].get_shape())
+            print('outputs', outputs.get_shape())
+            print('out_state')
+            shape_printer(out_state, 'MLH')
             return outputs, out_state
 
         # with tf.variable_scope(scope or type(self).__name__):
